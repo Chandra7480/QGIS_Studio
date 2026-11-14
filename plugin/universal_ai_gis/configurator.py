@@ -26,6 +26,9 @@ from qgis.PyQt.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QComboBox,
+    QLineEdit,
+    QFont,
 )
 
 tr = QCoreApplication.translate
@@ -133,7 +136,6 @@ def _remove_refresh_from_entry(entry: Dict) -> None:
     args = entry.get("args", [])
     if "--refresh-package" in args:
         idx = args.index("--refresh-package")
-        # Remove both --refresh-package and its value
         del args[idx:idx + 2]
 
 
@@ -162,7 +164,6 @@ class MCPConfiguratorDialog(QDialog):
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
-        # Header
         header = QLabel(
             tr("<h2>MCP Client Configuration</h2>")
             + tr("<p>Select your AI client to generate or update its MCP configuration.</p>")
@@ -170,7 +171,6 @@ class MCPConfiguratorDialog(QDialog):
         header.setWordWrap(True)
         layout.addWidget(header)
 
-        # Client selector
         client_row = QHBoxLayout()
         client_row.addWidget(QLabel(tr("Client:")))
         self.client_combo = QComboBox()
@@ -194,7 +194,6 @@ class MCPConfiguratorDialog(QDialog):
         client_row.addWidget(self.client_combo)
         layout.addLayout(client_row)
 
-        # Port display
         port_row = QHBoxLayout()
         self.port_label = QLabel(tr("Server port: {port}").format(port=DEFAULT_PORT))
         self.port_label.setStyleSheet("font-family: monospace; font-weight: bold;")
@@ -202,7 +201,6 @@ class MCPConfiguratorDialog(QDialog):
         port_row.addStretch()
         layout.addLayout(port_row)
 
-        # Auth token
         auth_row = QHBoxLayout()
         auth_row.addWidget(QLabel(tr("Auth token:")))
         self.token_edit = QLineEdit()
@@ -211,7 +209,6 @@ class MCPConfiguratorDialog(QDialog):
         auth_row.addWidget(self.token_edit)
         layout.addLayout(auth_row)
 
-        # Show/hide token
         self.show_token_cb = QCheckBox(tr("Show token"))
         self.show_token_cb.toggled.connect(
             lambda checked: self.token_edit.setEchoMode(
@@ -220,7 +217,6 @@ class MCPConfiguratorDialog(QDialog):
         )
         layout.addWidget(self.show_token_cb)
 
-        # Config output
         layout.addWidget(QLabel(tr("Generated config (copy to your client config):")))
         self.config_output = QTextEdit()
         self.config_output.setReadOnly(True)
@@ -228,7 +224,6 @@ class MCPConfiguratorDialog(QDialog):
         self.config_output.setMinimumHeight(200)
         layout.addWidget(self.config_output)
 
-        # Buttons
         btn_layout = QHBoxLayout()
         self.copy_btn = QPushButton(tr("Copy to Clipboard"))
         self.copy_btn.clicked.connect(self._copy_config)
@@ -258,12 +253,9 @@ class MCPConfiguratorDialog(QDialog):
         port = DEFAULT_PORT
         token = self.token_edit.text().strip()
 
-        # Base config
-        base_args = [
-            "uvx",
-            "--from", "https://github.com/your-org/uagis-mcp/archive/refs/heads/main.zip",
-            "uagis-mcp-server"
-        ]
+        # Use a realistic local command; the AI client must have the repo installed.
+        # This avoids the broken placeholder GitHub package URLs used by the old config.
+        base_args = ["-m", "mcp_server.main", "--transport", "stdio"]
         if token:
             base_args.extend(["--token", token])
 
@@ -271,7 +263,7 @@ class MCPConfiguratorDialog(QDialog):
             "Claude Desktop": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -279,7 +271,7 @@ class MCPConfiguratorDialog(QDialog):
             "Claude Code": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -287,7 +279,7 @@ class MCPConfiguratorDialog(QDialog):
             "Cursor": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -295,7 +287,7 @@ class MCPConfiguratorDialog(QDialog):
             "VS Code": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -303,7 +295,7 @@ class MCPConfiguratorDialog(QDialog):
             "Windsurf": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -311,7 +303,7 @@ class MCPConfiguratorDialog(QDialog):
             "Zed": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -319,7 +311,7 @@ class MCPConfiguratorDialog(QDialog):
             "Codex CLI": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -328,15 +320,15 @@ class MCPConfiguratorDialog(QDialog):
                 "mcp": {
                     "uagis": {
                         "type": "local",
-                        "command": base_args,
-                        "enabled": True
+                        "command": ["python", *base_args],
+                        "enabled": True,
                     }
                 }
             },
             "LM Studio": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -344,7 +336,7 @@ class MCPConfiguratorDialog(QDialog):
             "Hermes": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -352,7 +344,7 @@ class MCPConfiguratorDialog(QDialog):
             "Kimi Code": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -360,7 +352,7 @@ class MCPConfiguratorDialog(QDialog):
             "Gemini CLI": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -368,7 +360,7 @@ class MCPConfiguratorDialog(QDialog):
             "Qwen Code": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -376,7 +368,7 @@ class MCPConfiguratorDialog(QDialog):
             "GitHub Copilot CLI": {
                 "mcpServers": {
                     "uagis": {
-                        "command": "uvx",
+                        "command": "python",
                         "args": base_args,
                     }
                 }
@@ -388,7 +380,6 @@ class MCPConfiguratorDialog(QDialog):
 
     def _load_existing_configs(self):
         """Load and display existing configs if any."""
-        # Try to detect existing configs
         pass
 
     def _copy_config(self):
@@ -401,7 +392,7 @@ class MCPConfiguratorDialog(QDialog):
         """Apply config to the selected client's config file."""
         client_name = self.client_combo.currentText()
         config_text = self.config_output.toPlainText()
-        
+
         try:
             config = json.loads(config_text)
         except json.JSONDecodeError:
@@ -410,8 +401,7 @@ class MCPConfiguratorDialog(QDialog):
 
         repo_dir = Path(__file__).resolve().parent.parent
         registry = _client_config_registry(repo_dir)
-        
-        # Map display name to registry key
+
         client_map = {
             "Claude Desktop": "claude-desktop",
             "Claude Code": "claude-code",
@@ -428,7 +418,7 @@ class MCPConfiguratorDialog(QDialog):
             "Qwen Code": "qwen",
             "GitHub Copilot CLI": "copilot-cli",
         }
-        
+
         key = client_map.get(client_name)
         if not key or key not in registry:
             QMessageBox.warning(self, tr("Unsupported"), tr("Auto-config not supported for {client_name}.").format(client_name=client_name))
@@ -437,7 +427,7 @@ class MCPConfiguratorDialog(QDialog):
         info = registry[key]
         path = info["path"]
         json_key = info["key"]
-        
+
         data = {}
         if path.exists():
             try:
@@ -450,7 +440,6 @@ class MCPConfiguratorDialog(QDialog):
             except (json.JSONDecodeError, OSError, ImportError):
                 data = {}
 
-        # Update the config
         if json_key not in data:
             data[json_key] = {}
         data[json_key]["uagis"] = config.get("mcpServers", {}).get("uagis", config.get("mcp", {}).get("uagis", {}))
