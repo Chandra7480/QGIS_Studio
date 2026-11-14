@@ -1,0 +1,18 @@
+# Dependency Review Configuration for Universal AI GIS Studio
+# Fails on moderate or higher severity vulnerabilities
+
+# Fail on moderate, high, or critical vulnerabilities
+fail-on-severity: moderate
+
+# Allow specific vulnerabilities (use sparingly with justification)
+# allow-ghsas:
+#   - GHSA-xxxx-xxxx-xxxx  # Justification: ...
+
+# Optional: configure external vulnerability database
+# vulnerability-database: "github-advisory-database"
+
+# Optional: specify which manifests to check
+# manifests:
+#   - requirements/base.txt
+#   - requirements/dev.txt
+#   - pyproject.toml

@@ -1,0 +1,2 @@
+# Universal AI GIS Studio — MCP server dependencies
+mcp>=1.2.0

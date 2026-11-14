@@ -1,0 +1,4 @@
+# Universal AI GIS Studio — development dependencies
+pytest>=7.0.0
+pytest-qt>=4.0.0
+aiohttp>=3.9.0

@@ -1,0 +1,2 @@
+# Universal AI GIS Studio — secure credential storage
+keyring>=24.0.0

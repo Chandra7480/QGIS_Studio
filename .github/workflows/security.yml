@@ -1,0 +1,343 @@
+name: Security Analysis
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run weekly on Mondays at 03:00 UTC
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  PIP_CACHE_DIR: ~/.cache/pip
+
+jobs:
+  # ============================================================
+  # 1. CODEQL ANALYSIS
+  # ============================================================
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Use default queries + security-extended
+          queries: +security-extended,+security-and-quality
+          config-file: ./.github/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+          upload: true
+
+  # ============================================================
+  # 2. PIP-AUDIT (Dependency Vulnerability Scanning)
+  # ============================================================
+  pip-audit:
+    name: Dependency Audit (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements/base.txt
+            requirements/dev.txt
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements/base.txt
+          pip install -e ".[pytest]"
+          pip install pip-audit
+
+      - name: Run pip-audit
+        id: pip_audit
+        run: |
+          # Audit all installed packages
+          pip-audit --format=json --output=pip-audit-report.json || true
+          
+          # Also audit requirements files
+          pip-audit -r requirements/base.txt --format=json --output=pip-audit-base.json || true
+          pip-audit -r requirements/dev.txt --format=json --output=pip-audit-dev.json || true
+          
+          # Check for vulnerabilities (exit code 1 if found)
+          VULN_COUNT=$(jq '[.vulnerabilities[]? | select(.fix_versions[]?)] | length' pip-audit-report.json 2>/dev/null || echo 0)
+          echo "vulnerabilities=$VULN_COUNT" >> $GITHUB_OUTPUT
+          
+          # Summary
+          if [ "$VULN_COUNT" -gt 0 ]; then
+            echo "⚠️ Found $VULN_COUNT vulnerabilities with available fixes"
+            jq -r '.vulnerabilities[]? | "\(.name) \(.version): \(.vulnerabilities[0].id) - \(.vulnerabilities[0].description)"' pip-audit-report.json 2>/dev/null | head -20
+          else
+            echo "✅ No vulnerabilities with available fixes found"
+          fi
+
+      - name: Upload pip-audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-reports
+          path: |
+            pip-audit-report.json
+            pip-audit-base.json
+            pip-audit-dev.json
+          retention-days: 30
+
+      - name: Comment on PR with vulnerabilities
+        if: github.event_name == 'pull_request' && steps.pip_audit.outputs.vulnerabilities != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('pip-audit-report.json', 'utf8'));
+            let body = '## 🔒 pip-audit Vulnerability Report\n\n';
+            body += `Found **${${{ steps.pip_audit.outputs.vulnerabilities }}}** vulnerabilities with available fixes.\n\n`;
+            body += '| Package | Version | Vulnerability | Fix Version |\n';
+            body += '|---------|---------|---------------|-------------|\n';
+            for (const vuln of report.vulnerabilities || []) {
+              if (vuln.fix_versions && vuln.fix_versions.length > 0) {
+                body += `| ${vuln.name} | ${vuln.version} | ${vuln.vulnerabilities[0]?.id || 'N/A'} | ${vuln.fix_versions[0]} |\n`;
+              }
+            }
+            body += '\n> Run `pip-audit` locally for full details.';
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ============================================================
+  # 3. BANDIT (Python Security Linting)
+  # ============================================================
+  bandit:
+    name: Static Analysis (Bandit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements/base.txt
+            requirements/dev.txt
+            pyproject.toml
+
+      - name: Install Bandit
+        run: |
+          pip install --upgrade pip
+          pip install bandit[toml]
+
+      - name: Run Bandit
+        id: bandit
+        run: |
+          # Run bandit with config
+          bandit -r . \
+            -f json \
+            -o bandit-report.json \
+            --exclude .git,__pycache__,.pytest_cache,build,dist,tests,scripts/generate_icons.py \
+            --skip B101,B311,B601 \
+            --severity-level medium \
+            --confidence-level medium || true
+          
+          # Count issues by severity
+          HIGH=$(jq '[.results[]? | select(.severity=="HIGH")] | length' bandit-report.json 2>/dev/null || echo 0)
+          MEDIUM=$(jq '[.results[]? | select(.severity=="MEDIUM")] | length' bandit-report.json 2>/dev/null || echo 0)
+          LOW=$(jq '[.results[]? | select(.severity=="LOW")] | length' bandit-report.json 2>/dev/null || echo 0)
+          
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+          echo "low=$LOW" >> $GITHUB_OUTPUT
+          
+          echo "Bandit Results: HIGH=$HIGH, MEDIUM=$MEDIUM, LOW=$LOW"
+          
+          # Fail on HIGH severity issues
+          if [ "$HIGH" -gt 0 ]; then
+            echo "❌ HIGH severity issues found"
+            exit 1
+          fi
+
+      - name: Upload Bandit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          retention-days: 30
+
+      - name: Upload Bandit SARIF
+        run: |
+          bandit -r . \
+            -f sarif \
+            -o bandit-report.sarif \
+            --exclude .git,__pycache__,.pytest_cache,build,dist,tests,scripts/generate_icons.py \
+            --skip B101,B311,B601 \
+            --severity-level medium \
+            --confidence-level medium || true
+        if: always()
+
+      - name: Upload Bandit SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: bandit-report.sarif
+          category: bandit
+
+      - name: Comment on PR with Bandit results
+        if: github.event_name == 'pull_request' && (steps.bandit.outputs.high != '0' || steps.bandit.outputs.medium != '0')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('bandit-report.json', 'utf8'));
+            let body = '## 🔍 Bandit Security Analysis\n\n';
+            body += `**HIGH:** ${{ steps.bandit.outputs.high }} | **MEDIUM:** ${{ steps.bandit.outputs.medium }} | **LOW:** ${{ steps.bandit.outputs.low }}\n\n`;
+            if (report.results && report.results.length > 0) {
+              body += '| File | Line | Severity | Confidence | Issue |\n';
+              body += '|------|------|----------|------------|-------|\n';
+              for (const result of report.results.slice(0, 20)) {
+                body += `| ${result.filename} | ${result.line_number} | ${result.severity} | ${result.confidence} | ${result.issue_text.replace(/\|/g, '\\|')} |\n`;
+              }
+            }
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ============================================================
+  # 4. TRUFFLEHOG (Secrets Scanning)
+  # ============================================================
+  trufflehog:
+    name: Secrets Scan (TruffleHog)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for secrets scanning
+
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha || github.sha }}
+          head: ${{ github.event.pull_request.head.sha || github.sha }}
+          extra_args: --json --fail --no-verification
+
+      - name: Upload TruffleHog results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trufflehog-results
+          path: trufflehog-results.json
+          retention-days: 30
+
+  # ============================================================
+  # 5. DEPENDENCY REVIEW (for PRs)
+  # ============================================================
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          config-file: '.github/dependency-review-config.yml'
+          fail-on-severity: moderate
+
+  # ============================================================
+  # 6. LICENSE CHECK
+  # ============================================================
+  license-check:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install pip-licenses
+        run: pip install pip-licenses
+
+      - name: Check licenses
+        run: |
+          # Generate license report
+          pip-licenses --format=json --output-file=licenses.json
+          
+          # Check for problematic licenses (GPL, AGPL, etc.)
+          PROBLEMATIC=$(jq -r '.[] | select(.License | test("GPL|AGPL|SSPL|Commons Clause|PolyForm|BSL|Elastic|Confluent|MongoDB|Redis|Timescale|Cockroach")) | "\(.Name) \(.Version): \(.License)"' licenses.json)
+          
+          if [ -n "$PROBLEMATIC" ]; then
+            echo "⚠️ Potentially problematic licenses found:"
+            echo "$PROBLEMATIC"
+            # Don't fail, just warn
+          else
+            echo "✅ No problematic licenses detected"
+          fi
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: license-report
+          path: licenses.json
+          retention-days: 30
+
+# ============================================================
+# Concurrency control
+# ============================================================
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true

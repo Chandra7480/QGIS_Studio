@@ -1,0 +1,90 @@
+name: automatic-georeferencing
+version: "1.0.0"
+description: Automatically georeference scanned maps by detecting landmarks via OpenCV (ORB/SIFT), generating candidate Ground Control Points matched to a reference raster, validating them, and executing the transformation via QGIS/GDAL.
+category: georeferencing
+author: Universal AI GIS Studio
+license: MIT
+
+entrypoint: engines.georeferencing.georeferencing_engine.GeoreferencingEngine
+
+permissions: []
+  - name: qgis:georeference:read
+    description: Read scanned map images and reference data
+  - name: qgis:gcp:write
+    description: Generate and validate Ground Control Points
+
+capabilities:
+  - inspect_image
+  - detect_landmarks
+  - generate_gcps
+  - validate_gcps
+  - transform_with_qgis
+
+input_schema:
+  type: object
+  properties:
+    image_path:
+      type: string
+      description: Path to the scanned map image file
+    reference_source:
+      type: string
+      description: Path to reference raster with known georeferencing
+    target_crs:
+      type: string
+      description: Target CRS (e.g. EPSG:4326)
+      default: "EPSG:4326"
+    geotransform:
+      type: array
+      items:
+        type: number
+      description: GDAL geotransform [originX, pxW, rowRot, originY, colRot, pxH]
+    min_confidence:
+      type: number
+      description: Minimum confidence threshold for GCP candidates (0.0-1.0)
+      default: 0.5
+
+output_schema:
+  type: object
+  properties:
+    gcps:
+      type: array
+      items:
+        type: object
+        properties:
+          source_pixel_x:
+            type: number
+          source_pixel_y:
+            type: number
+          dest_map_x:
+            type: number
+          dest_map_y:
+            type: number
+          crs:
+            type: string
+          confidence:
+            type: number
+          landmark_description:
+            type: string
+          validation_status:
+            type: string
+    count:
+      type: integer
+    validation_report:
+      type: object
+      properties:
+        accepted:
+          type: integer
+        rejected:
+          type: integer
+        rmse:
+          type: number
+        min_points_met:
+          type: boolean
+        distribution_ok:
+          type: boolean
+
+security:
+  no_shell_access: true
+  no_network_access: true
+  file_access: read_only_inputs
+  coordinate_policy: never_invent_coordinates

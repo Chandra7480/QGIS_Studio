@@ -1,0 +1,12 @@
+name=universal_ai_gis
+description=MCP-first AI-controlled QGIS automation platform. Provides a QGIS Bridge, MCP server integration, visual automation, AI cursor, georeferencing, and 25 GIS functional clusters.
+version=1.0.0
+qgisMinimumVersion=3.0
+qgisMaximumVersion=4.99
+author=Universal AI GIS Studio
+email=
+license=MIT
+homepage=https://example.com/universal-ai-gis-studio
+repository=https://example.com/universal-ai-gis-studio
+icon=resources/icon.png
+about=about.html

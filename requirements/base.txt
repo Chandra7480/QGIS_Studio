@@ -1,0 +1,5 @@
+# Universal AI GIS Studio — base dependencies
+# Core runtime (no local AI models; AI is external only)
+pydantic>=2.5.0
+pytest>=7.0.0
+aiosqlite>=0.20.0

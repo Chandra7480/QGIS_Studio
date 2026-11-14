@@ -1,0 +1,598 @@
+name: QGIS Plugin Validation
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'plugin/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'plugin/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  QGIS_VERSION: "3.34"
+  PLUGIN_DIR: plugin/universal_ai_gis
+
+jobs:
+  # ============================================================
+  # 1. VALIDATE METADATA.TXT FORMAT
+  # ============================================================
+  validate-metadata:
+    name: Validate metadata.txt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Validate metadata.txt
+        id: metadata
+        run: |
+          METADATA_FILE="${{ env.PLUGIN_DIR }}/metadata.txt"
+          
+          if [ ! -f "$METADATA_FILE" ]; then
+            echo "ERROR metadata.txt not found at $METADATA_FILE"
+            exit 1
+          fi
+          
+          echo "Validating $METADATA_FILE"
+          cat "$METADATA_FILE"
+          
+          # Required fields per QGIS plugin specification
+          REQUIRED_FIELDS=("name" "description" "version" "qgisMinimumVersion" "author" "email" "license" "icon")
+          
+          MISSING=()
+          for field in "${REQUIRED_FIELDS[@]}"; do
+            if ! grep -q "^${field}=" "$METADATA_FILE"; then
+              MISSING+=("$field")
+            fi
+          done
+          
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "ERROR Missing required fields: ${MISSING[*]}"
+            exit 1
+          fi
+          
+          # Validate version format (semver)
+          VERSION=$(grep "^version=" "$METADATA_FILE" | cut -d'=' -f2)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$ ]]; then
+            echo "ERROR Invalid version format: $VERSION (expected semver)"
+            exit 1
+          fi
+          
+          # Validate qgisMinimumVersion
+          QGIS_MIN=$(grep "^qgisMinimumVersion=" "$METADATA_FILE" | cut -d'=' -f2)
+          if ! [[ "$QGIS_MIN" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "ERROR Invalid qgisMinimumVersion format: $QGIS_MIN"
+            exit 1
+          fi
+          
+          # Validate icon path exists
+          ICON=$(grep "^icon=" "$METADATA_FILE" | cut -d'=' -f2)
+          ICON_PATH="${{ env.PLUGIN_DIR }}/${ICON}"
+          if [ ! -f "$ICON_PATH" ]; then
+            echo "ERROR Icon file not found: $ICON_PATH"
+            exit 1
+          fi
+          
+          # Validate about file if specified
+          if grep -q "^about=" "$METADATA_FILE"; then
+            ABOUT=$(grep "^about=" "$METADATA_FILE" | cut -d'=' -f2)
+            ABOUT_PATH="${{ env.PLUGIN_DIR }}/${ABOUT}"
+            if [ ! -f "$ABOUT_PATH" ]; then
+              echo "ERROR About file not found: $ABOUT_PATH"
+              exit 1
+            fi
+          fi
+          
+          # Validate email format
+          EMAIL=$(grep "^email=" "$METADATA_FILE" | cut -d'=' -f2)
+          if [ -n "$EMAIL" ] && ! [[ "$EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+            echo "WARN Email format may be invalid: $EMAIL"
+          fi
+          
+          echo "OK metadata.txt validation passed"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Upload metadata validation result
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: metadata-validation
+          path: ${{ env.PLUGIN_DIR }}/metadata.txt
+          retention-days: 7
+
+  # ============================================================
+  # 2. CHECK ZIP STRUCTURE
+  # ============================================================
+  validate-zip-structure:
+    name: Validate ZIP Structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Create plugin ZIP for validation
+        run: |
+          PLUGIN_NAME="universal_ai_gis"
+          ZIP_NAME="${PLUGIN_NAME}-validation.zip"
+          
+          # Create clean plugin directory
+          rm -rf build_plugin
+          mkdir -p build_plugin/${PLUGIN_NAME}
+          
+          # Copy plugin files
+          rsync -av \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='*.pyo' \
+            --exclude='.pytest_cache' \
+            --exclude='.git' \
+            --exclude='tests' \
+            --exclude='*.md' \
+            --exclude='analysis_output.md' \
+            ${{ env.PLUGIN_DIR }}/ build_plugin/${PLUGIN_NAME}/
+          
+          # Create ZIP
+          cd build_plugin
+          zip -r "../${ZIP_NAME}" ${PLUGIN_NAME}
+          cd ..
+          
+          echo "zip_path=${ZIP_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Validate ZIP structure
+        id: zip_check
+        run: |
+          ZIP_PATH="${{ steps.create_zip.outputs.zip_path }}"
+          
+          echo "Validating ZIP structure: $ZIP_PATH"
+          
+          # List contents
+          unzip -l "$ZIP_PATH"
+          
+          # Check required files in ZIP
+          REQUIRED_IN_ZIP=(
+            "universal_ai_gis/__init__.py"
+            "universal_ai_gis/metadata.txt"
+            "universal_ai_gis/plugin.py"
+            "universal_ai_gis/resources/icon.png"
+          )
+          
+          MISSING=()
+          for file in "${REQUIRED_IN_ZIP[@]}"; do
+            if ! unzip -l "$ZIP_PATH" | grep -q "$file"; then
+              MISSING+=("$file")
+            fi
+          done
+          
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "ERROR Missing required files in ZIP: ${MISSING[*]}"
+            exit 1
+          fi
+          
+          # Check no __pycache__ or .pyc files in ZIP
+          if unzip -l "$ZIP_PATH" | grep -qE "__pycache__|\.pyc$|\.pyo$"; then
+            echo "ERROR ZIP contains compiled Python files (__pycache__/.pyc/.pyo)"
+            exit 1
+          fi
+          
+          # Check no hidden files (.git, .DS_Store, etc.)
+          if unzip -l "$ZIP_PATH" | grep -qE "^\s+\d+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+\..*"; then
+            echo "WARN ZIP may contain hidden files"
+          fi
+          
+          echo "OK ZIP structure validation passed"
+
+      - name: Upload validation ZIP
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plugin-zip-validation
+          path: ${{ steps.create_zip.outputs.zip_path }}
+          retention-days: 7
+
+  # ============================================================
+  # 3. VERIFY CLASSFACTORY EXISTS
+  # ============================================================
+  verify-classfactory:
+    name: Verify classFactory
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Verify classFactory in __init__.py
+        run: |
+          INIT_FILE="${{ env.PLUGIN_DIR }}/__init__.py"
+          
+          if [ ! -f "$INIT_FILE" ]; then
+            echo "ERROR __init__.py not found"
+            exit 1
+          fi
+          
+          echo "Checking classFactory in $INIT_FILE"
+          cat "$INIT_FILE"
+          
+          # Check for classFactory function
+          if ! grep -q "^def classFactory" "$INIT_FILE"; then
+            echo "ERROR classFactory function not found in __init__.py"
+            exit 1
+          fi
+          
+          # Check it accepts iface parameter
+          if ! grep -A2 "^def classFactory" "$INIT_FILE" | grep -q "iface"; then
+            echo "ERROR classFactory doesn't appear to accept 'iface' parameter"
+            exit 1
+          fi
+          
+          # Check it returns a plugin instance
+          if ! grep -A5 "^def classFactory" "$INIT_FILE" | grep -q "return"; then
+            echo "ERROR classFactory doesn't appear to return a plugin instance"
+            exit 1
+          fi
+          
+          echo "OK classFactory verification passed"
+
+      - name: Verify plugin class exists
+        run: |
+          PLUGIN_FILE="${{ env.PLUGIN_DIR }}/plugin.py"
+          
+          if [ ! -f "$PLUGIN_FILE" ]; then
+            echo "ERROR plugin.py not found"
+            exit 1
+          fi
+          
+          # Check for UniversalAIGISPlugin class
+          if ! grep -q "^class UniversalAIGISPlugin" "$PLUGIN_FILE"; then
+            echo "ERROR UniversalAIGISPlugin class not found in plugin.py"
+            exit 1
+          fi
+          
+          # Check it inherits from QgsPlugin (or object for basic check)
+          if ! grep -q "class UniversalAIGISPlugin" "$PLUGIN_FILE"; then
+            echo "ERROR UniversalAIGISPlugin class definition issue"
+            exit 1
+          fi
+          
+          # Check for initGui and unload methods
+          for method in "initGui" "unload"; do
+            if ! grep -q "def ${method}" "$PLUGIN_FILE"; then
+              echo "WARN ${method} method not found in UniversalAIGISPlugin"
+            fi
+          done
+          
+          echo "OK Plugin class verification passed"
+
+  # ============================================================
+  # 4. VALIDATE ICON REFERENCES
+  # ============================================================
+  validate-icons:
+    name: Validate Icon References
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Validate icon files
+        run: |
+          ICON_DIR="${{ env.PLUGIN_DIR }}/resources"
+          
+          if [ ! -d "$ICON_DIR" ]; then
+            echo "ERROR Resources directory not found: $ICON_DIR"
+            exit 1
+          fi
+          
+          echo "Validating icons in $ICON_DIR"
+          ls -la "$ICON_DIR"
+          
+          # Check main icon.png exists
+          MAIN_ICON="$ICON_DIR/icon.png"
+          if [ ! -f "$MAIN_ICON" ]; then
+            echo "ERROR Main icon.png not found"
+            exit 1
+          fi
+          
+          # Validate main icon using inline Python (no f-strings to avoid YAML parsing issues)
+          python3 -c "
+import sys, os
+from PIL import Image
+icon_path = os.environ.get('MAIN_ICON', '')
+if not icon_path:
+    print('ERROR MAIN_ICON not set')
+    sys.exit(1)
+try:
+    img = Image.open(icon_path)
+    img.verify()
+    img = Image.open(icon_path)
+    print('OK ' + icon_path + ': ' + str(img.size) + ', mode=' + img.mode + ', format=' + img.format)
+    if img.width < 24 or img.height < 24:
+        print('WARN Icon size ' + str(img.size) + ' is smaller than recommended 24x24')
+    if img.width > 256 or img.height > 256:
+        print('WARN Icon size ' + str(img.size) + ' is larger than recommended 256x256')
+except Exception as e:
+    print('ERROR Invalid PNG: ' + str(e))
+    sys.exit(1)
+"
+          
+          # Check for multiple size variants (optional but recommended)
+          for size in 24 48 128; do
+            variant="$ICON_DIR/icon_${size}x${size}.png"
+            if [ -f "$variant" ]; then
+              export VARIANT="$variant"
+              python3 -c "
+import sys, os
+from PIL import Image
+variant = os.environ.get('VARIANT', '')
+if not variant:
+    print('ERROR VARIANT not set')
+    sys.exit(1)
+img = Image.open(variant)
+print('OK ' + variant + ': ' + str(img.size))
+              "
+            else
+              echo "INFO Optional variant not found: icon_${size}x${size}.png"
+            fi
+          done
+          
+          echo "OK Icon validation passed"
+        env:
+          MAIN_ICON: ${{ env.PLUGIN_DIR }}/resources/icon.png
+
+  # ============================================================
+  # 5. PYTHON SYNTAX & IMPORT VALIDATION
+  # ============================================================
+  validate-python:
+    name: Validate Python Syntax & Imports
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements/base.txt
+            requirements/dev.txt
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements/base.txt
+          pip install -e ".[pytest]"
+
+      - name: Validate Python syntax
+        run: |
+          echo "Checking Python syntax..."
+          python -m py_compile ${{ env.PLUGIN_DIR }}/__init__.py
+          python -m py_compile ${{ env.PLUGIN_DIR }}/plugin.py
+          python -m py_compile ${{ env.PLUGIN_DIR }}/main_window.py
+          python -m py_compile ${{ env.PLUGIN_DIR }}/configurator.py
+          python -m py_compile ${{ env.PLUGIN_DIR }}/constants.py
+          python -m py_compile ${{ env.PLUGIN_DIR }}/compat.py
+          echo "OK Syntax validation passed"
+
+      - name: Validate imports (without QGIS)
+        run: |
+          echo "Checking imports (mocking QGIS)..."
+          
+          # Create a mock QGIS environment
+          python3 -c "
+import sys
+from unittest.mock import MagicMock
+
+# Mock QGIS modules
+mock_modules = [
+    'qgis', 'qgis.core', 'qgis.gui', 'qgis.PyQt', 'qgis.PyQt.QtCore',
+    'qgis.PyQt.QtGui', 'qgis.PyQt.QtWidgets', 'qgis.utils'
+]
+
+for mod in mock_modules:
+    sys.modules[mod] = MagicMock()
+
+# Mock QGIS-specific classes
+sys.modules['qgis.core'].QgsPlugin = type('QgsPlugin', (), {})
+sys.modules['qgis.core'].QgsMessageLog = MagicMock()
+sys.modules['qgis.core'].QgsProject = MagicMock()
+sys.modules['qgis.gui'].QgsMapCanvas = MagicMock()
+
+# Now import plugin modules
+sys.path.insert(0, '${{ env.PLUGIN_DIR }}')
+import __init__ as plugin_init
+import plugin
+import main_window
+import configurator
+import constants
+import compat
+
+# Verify classFactory is callable
+assert callable(plugin_init.classFactory), 'classFactory not callable'
+print('OK All plugin modules import successfully (with mocked QGIS)')
+"
+
+  # ============================================================
+  # 6. TEST PLUGIN LOADS IN QGIS (Windows CI with QGIS)
+  # ============================================================
+  test-qgis-load:
+    name: Test Plugin Load in QGIS
+    runs-on: windows-latest
+    timeout-minutes: 30
+    if: runner.os == 'Windows'
+    env:
+      QGIS_PREFIX_PATH: "C:/Program Files/QGIS 3.34"
+      PATH: "C:/Program Files/QGIS 3.34/bin;C:/Program Files/QGIS 3.34/apps/Python39;${{ env.PATH }}"
+      PYTHONPATH: "C:/Program Files/QGIS 3.34/apps/qgis/python;C:/Program Files/QGIS 3.34/apps/Python39/Lib/site-packages"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install QGIS LTR
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: qgis
+          version: 3.34
+
+      - name: Install QGIS via Chocolatey (fallback)
+        run: |
+          choco install qgis-ltr --version=3.34.0 -y --no-progress
+          "C:/Program Files/QGIS 3.34/bin/qgis-bin.exe" --version
+
+      - name: Set up Python (use QGIS Python)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+          architecture: x64
+
+      - name: Install test dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pytest pytest-qt
+
+      - name: Build plugin for testing
+        run: |
+          PLUGIN_NAME="universal_ai_gis"
+          rm -rf build_plugin
+          mkdir -p build_plugin/${PLUGIN_NAME}
+          rsync -av \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='*.pyo' \
+            --exclude='.pytest_cache' \
+            --exclude='.git' \
+            --exclude='tests' \
+            --exclude='*.md' \
+            --exclude='analysis_output.md' \
+            ${{ env.PLUGIN_DIR }}/ build_plugin/${PLUGIN_NAME}/
+          QGIS_PROFILE_DIR="$env:APPDATA/QGIS/QGIS3/profiles/default/python/plugins"
+          mkdir -p "$QGIS_PROFILE_DIR"
+          cp -r build_plugin/${PLUGIN_NAME} "$QGIS_PROFILE_DIR/"
+          echo "Plugin installed to $QGIS_PROFILE_DIR/${PLUGIN_NAME}"
+
+      - name: Test plugin loads in QGIS (headless)
+        run: |
+          python3 -c "
+import sys
+import os
+
+os.environ['QGIS_PREFIX_PATH'] = r'C:/Program Files/QGIS 3.34'
+sys.path.insert(0, r'C:/Program Files/QGIS 3.34/apps/qgis/python')
+sys.path.insert(0, r'C:/Program Files/QGIS 3.34/apps/Python39/Lib/site-packages')
+
+plugin_path = os.path.join(os.environ['APPDATA'], 'QGIS/QGIS3/profiles/default/python/plugins/universal_ai_gis')
+sys.path.insert(0, plugin_path)
+
+try:
+    from qgis.core import QgsApplication
+    qgs = QgsApplication([], False)
+    qgs.initQgis()
+    
+    import universal_ai_gis
+    from universal_ai_gis.plugin import UniversalAIGISPlugin
+    
+    class MockIface:
+        def __init__(self):
+            self.mainWindow = lambda: None
+            self.mapCanvas = lambda: None
+            self.legendInterface = lambda: None
+            self.addPluginToMenu = lambda *args: None
+            self.removePluginFromMenu = lambda *args: None
+            self.addToolBarIcon = lambda *args: None
+            self.removeToolBarIcon = lambda *args: None
+    
+    iface = MockIface()
+    plugin = universal_ai_gis.classFactory(iface)
+    
+    plugin.initGui()
+    print('OK Plugin initGui() succeeded')
+    
+    plugin.unload()
+    print('OK Plugin unload() succeeded')
+    
+    qgs.exitQgis()
+    print('OK Plugin loads and unloads successfully in QGIS!')
+    
+except Exception as e:
+    print('ERROR Plugin load test failed: ' + str(e))
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+"
+
+  # ============================================================
+  # 7. PLUGIN METADATA CONSISTENCY CHECK
+  # ============================================================
+  metadata-consistency:
+    name: Metadata Consistency Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cross-reference metadata with code
+        run: |
+          METADATA_FILE="${{ env.PLUGIN_DIR }}/metadata.txt"
+          INIT_FILE="${{ env.PLUGIN_DIR }}/__init__.py"
+          
+          METADATA_VERSION=$(grep "^version=" "$METADATA_FILE" | cut -d'=' -f2)
+          INIT_VERSION=$(grep "^__version__" "$INIT_FILE" | cut -d'=' -f2 | tr -d ' "\'')
+          
+          echo "metadata.txt version: $METADATA_VERSION"
+          echo "__init__.py version: $INIT_VERSION"
+          
+          if [ "$METADATA_VERSION" != "$INIT_VERSION" ]; then
+            echo "ERROR Version mismatch between metadata.txt and __init__.py"
+            exit 1
+          fi
+          
+          METADATA_NAME=$(grep "^name=" "$METADATA_FILE" | cut -d'=' -f2)
+          if [ "$METADATA_NAME" != "universal_ai_gis" ]; then
+            echo "WARN Plugin name in metadata.txt is '$METADATA_NAME', expected 'universal_ai_gis'"
+          fi
+          
+          echo "OK Metadata consistency check passed"
+
+# ============================================================
+# Concurrency control
+# ============================================================
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
