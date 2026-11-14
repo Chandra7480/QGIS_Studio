@@ -1,0 +1,140 @@
+version: '3.8'
+
+# Universal AI GIS Studio — Docker Compose
+# Run the full stack: MCP Server, Bridge, and optional services
+
+services:
+  # =============================================================================
+  # MCP Server (core service)
+  # =============================================================================
+  mcp-server:
+    build:
+      context: .
+      target: mcp-server
+    container_name: uagis-mcp-server
+    restart: unless-stopped
+    environment:
+      - UAGIS_BRIDGE_URL=http://bridge:8765
+      - UAGIS_BRIDGE_AUTH_TOKEN=${UAGIS_BRIDGE_AUTH_TOKEN:-}
+      - MCP_TRANSPORT=streamable-http
+      - MCP_HTTP_PORT=8766
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8766:8766"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8766/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      bridge:
+        condition: service_healthy
+    networks:
+      - uagis-network
+
+  # =============================================================================
+  # QGIS Bridge Server
+  # =============================================================================
+  bridge:
+    build:
+      context: .
+      target: bridge-server
+    container_name: uagis-bridge
+    restart: unless-stopped
+    environment:
+      - BRIDGE_HOST=0.0.0.0
+      - BRIDGE_PORT=8765
+      - BRIDGE_WS_PORT=8767
+      - BRIDGE_AUTH_TOKEN=${UAGIS_BRIDGE_AUTH_TOKEN:-}
+      - QGIS_PREFIX_PATH=/usr
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8765:8765"
+      - "8767:8767"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - uagis-network
+
+  # =============================================================================
+  # Redis (for distributed rate limiting and caching)
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: uagis-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - uagis-network
+
+  # =============================================================================
+  # Prometheus (metrics collection)
+  # =============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: uagis-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - uagis-network
+
+  # =============================================================================
+  # Grafana (visualization)
+  # =============================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: uagis-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    networks:
+      - uagis-network
+
+volumes:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  uagis-network:
+    driver: bridge

@@ -1,2 +1,14 @@
-# Universal AI GIS Studio — secure credential storage
+# Universal AI GIS Studio — Keyring / Credential storage
+
+# Keyring backends
 keyring>=24.0.0
+
+# Platform-specific backends
+# Windows: pywin32 (built into keyring on Windows)
+# macOS: keyring uses native Keychain
+# Linux: secretstorage (optional, for Secret Service)
+
+secretstorage>=3.3.0  # Linux Secret Service
+
+# Cryptography for fallback encrypted file storage
+cryptography>=41.0.0

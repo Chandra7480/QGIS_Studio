@@ -1,140 +1,297 @@
 # Universal AI GIS Studio
 
-Universal AI GIS Studio is a complete, extensible, MCP-first AI-controlled GIS
-automation ecosystem integrated with QGIS Desktop. It lets an external AI
-assistant (OpenCode, Codex, or any MCP-compatible client) control QGIS through
-natural language, while the platform provides actual GIS execution, visual
-interaction, verification, and control.
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-1.2+-orange.svg)](https://modelcontextprotocol.io/)
+[![QGIS](https://img.shields.io/badge/QGIS-4.x-red.svg)](https://qgis.org/)
+[![CI](https://github.com/Chandra7480/QGIS_Studio/actions/workflows/ci.yml/badge.svg)](https://github.com/Chandra7480/QGIS_Studio/actions/workflows/ci.yml)
+[![Security](https://github.com/Chandra7480/QGIS_Studio/actions/workflows/security.yml/badge.svg)](https://github.com/Chandra7480/QGIS_Studio/actions/workflows/security.yml)
 
-**AI policy:** No local AI model is bundled. AI is supplied externally via
-OpenCode, Codex, other MCP-compatible clients, or optional API providers
-(OpenAI, Gemini, Anthropic, OpenRouter, OpenAI-compatible, custom).
+**Universal AI GIS Studio** is a complete, extensible, **MCP-first AI-controlled GIS automation ecosystem** integrated with QGIS Desktop. It lets an external AI assistant (OpenCode, Codex, Cursor, VS Code, or any MCP-compatible client) control QGIS through natural language, while the platform provides actual GIS execution, visual interaction, verification, and control.
 
-## Verified environment (development host)
+**AI Policy:** No local AI model is bundled. AI is supplied externally via OpenCode, Codex, Cursor, VS Code, Claude, or any MCP-compatible client, plus optional API providers (OpenAI, Gemini, Anthropic, OpenRouter, OpenAI-compatible, custom).
 
-- OS: Windows 10 Home x64, 8 GB RAM, 1 CPU, HDD
-- QGIS Desktop: 4.2.3 (Qt6) at `C:\Program Files\QGIS 4.2.3`
-- Python: 3.12.10 (system), 3.12.15 (QGIS bundled)
-- GDAL/OGR: 3.13.3
-- OpenCode: 1.19.5
-- Node: v24.22.1
-- PyQGIS importable inside QGIS bundled Python
+---
 
-## Package layout
+## ✨ Key Features
 
-```
-Universal-AI-GIS-Studio/
-├── plugin/universal_ai_gis/   # QGIS plugin (installs into QGIS profile)
-│   ├── __init__.py
-│   ├── metadata.txt
-│   ├── plugin.py              # classFactory entry point + bridge
-│   └── main_window.py
-├── bridge/                    # QGIS Bridge (localhost HTTP/IPC)
-├── mcp_server/                # Universal MCP server (stdio + Streamable HTTP)
-├── core/                      # config, database, logging, jobs, events
-├── database/                  # SQLite schema + repositories
-├── engines/                   # screen capture, cursor, CV, georeferencing, verification
-├── clusters/                  # M01–M25 GIS functional clusters
-├── agents/                    # 29 built-in agents + custom builder + orchestrator
-├── skills/                    # skill manager + loader + validator
-├── workflows/                 # workflow builder + execution engine
-├── extensions/                # extension manager
-├── integrations/              # AI host, API provider, MCP managers
-├── security/                  # permissions, approvals, auth
-├── monitoring/                # audit, resource monitoring
-├── tests/unit/                # automated test suite
-├── requirements/
-├── pyproject.toml
-├── README.md
-├── CHANGELOG.md
-├── LICENSE
-└── docs/
-    ├── SYSTEM_ARCHITECTURE.md
-    ├── DEVELOPMENT_STATUS.md
-    ├── IMPLEMENTATION_CHECKLIST.md
-    ├── TECHNICAL_DECISIONS.md
-    └── TEST_PLAN.md
-```
+| Category | Features |
+|----------|----------|
+| **MCP Server** | MCP 1.2+ compliance, stdio + Streamable HTTP, 150+ tools, 25+ namespaces |
+| **QGIS Bridge** | FastAPI + WebSocket, 340+ tools, rate limiting, Prometheus metrics |
+| **GIS Clusters** | 25 clusters (M01-M25), 430+ operations |
+| **Agents** | 29 built-in + custom builder + orchestrator |
+| **Workflows** | DAG engine, 13 node types, checkpointing, pause/resume |
+| **Engines** | 7: screen, visual automation, cursor, mouse/keyboard, verification, CV, georeferencing |
+| **Security** | Permissions, approvals, API keys, rate limiting, audit logs |
+| **Monitoring** | Tamper-proof audit, health checks, resource quotas |
+| **Plugin** | QGIS 4.x, 21 panels, MCP configurator for 14 AI clients |
 
-## Installation
+---
 
-### 1. QGIS Plugin
+## 🚀 Quick Start
 
-Copy `plugin/universal_ai_gis/` into your QGIS profile plugins folder:
+### Prerequisites
 
-- Windows: `%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\`
-- Then restart QGIS and enable "Universal AI GIS Studio" in the Plugin Manager.
+- **Python 3.11+**
+- **QGIS 4.x** (Qt6) - [Download](https://qgis.org/download)
+- **Git**
+- **OpenCode/Codex/Cursor** (or any MCP client)
 
-The plugin starts the QGIS Bridge (localhost HTTP, default `127.0.0.1:8765`)
-inside QGIS.
-
-### 2. Universal MCP Server
+### 1. Clone & Install
 
 ```bash
-cd Universal-AI-GIS-Studio
-pip install -r requirements/mcp.txt -r requirements/base.txt
+# Clone the repository
+git clone https://github.com/Chandra7480/QGIS_Studio.git
+cd QGIS_Studio
 
-# stdio transport (OpenCode / local MCP clients)
+# Install dependencies (choose your method)
+# Option A: Using Make (recommended)
+make install-all
+
+# Option B: Using pip with extras
+pip install -e .[mcp,opencv,dev]
+
+# Option C: Using requirements files
+pip install -r requirements.txt
+```
+
+### 2. Install QGIS Plugin
+
+```bash
+# Windows
+copy plugin\universal_ai_gis %APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\universal_ai_gis
+
+# Linux/macOS
+cp -r plugin/universal_ai_gis ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/universal_ai_gis
+```
+
+Restart QGIS and enable **"Universal AI GIS Studio"** in Plugin Manager.
+
+### 3. Start Services
+
+```bash
+# Terminal 1: Start QGIS Bridge (inside QGIS Python)
+# The plugin auto-starts the bridge on port 8765
+
+# Terminal 2: Start MCP Server (stdio for OpenCode/Codex)
 python -m mcp_server.main --transport stdio
 
-# Streamable HTTP transport
+# Or: Streamable HTTP for web clients
 python -m mcp_server.main --transport streamable-http --port 8766
 ```
 
-Configure the bridge URL via `UAGIS_BRIDGE_URL` (default `http://127.0.0.1:8765`).
+### 4. Connect AI Client
 
-### 3. OpenCode MCP integration
-
-OpenCode supports MCP servers natively. Add the Universal GIS MCP server:
-
+**OpenCode:**
 ```bash
-opencode mcp add uagis --global --command python \
-  --args -m mcp_server.main --transport stdio
-opencode mcp list
+opencode mcp add uagis --global --command python --args -m mcp_server.main --transport stdio
 ```
 
-Then, in an OpenCode session, ask it to list and call tools such as
-`qgis.system.inspect`, `qgis.layers.inspect`, `qgis.layers.load`,
-`qgis.algorithms.discover`, `qgis.screen.capture`, `qgis.cursor.move`.
-
-## Core capabilities
-
-- QGIS project & layer inspection and management
-- Live QGIS screen capture + AI cursor + mouse/keyboard control
-- 25 GIS functional clusters (vector, raster, CRS, spatial, terrain,
-  hydrology, network, remote sensing, cartography, database, quality, …)
-- Automatic georeferencing + GCP intelligence (OpenCV ORB/SIFT, RANSAC)
-- 29 built-in agents + custom agent builder + orchestrator
-- Skills, workflows, extensions
-- SQLite database, audit logs, verification engine, security approvals
-
-## Verified test suite
-
-```bash
-cd Universal-AI-GIS-Studio
-pip install pytest
-python -m pytest tests/unit/
+**Cursor/VS Code (MCP):**
+```json
+{
+  "mcpServers": {
+    "uagis": {
+      "command": "python",
+      "args": ["-m", "mcp_server.main", "--transport", "stdio"]
+    }
+  }
+}
 ```
 
-All unit tests pass against the real environment (no QGIS GUI required for
-unit tests; integration tests need a running QGIS instance).
+**Claude Desktop:**
+Add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "uagis": {
+      "command": "python",
+      "args": ["-m", "mcp_server.main", "--transport", "stdio"]
+    }
+  }
+}
+```
 
-## Security
+---
 
-- Authenticated QGIS Bridge (token optional)
-- Tool allowlists and agent permission levels
-- User approval required before destructive operations
-- API keys stored in OS credential manager (never plaintext in DB/logs)
-- Audit logs for all security-relevant operations
-- Emergency stop and job cancellation
+## 🐳 Docker Deployment
 
-## Limitations (documented)
+```bash
+# Build and run full stack
+docker-compose up -d
 
-- QGIS 4.x is Qt6-based; UI targets PyQt6 (not PyQt5).
-- `import qgis` works only inside QGIS's bundled Python; the MCP server runs
-  outside QGIS and talks to the bridge over localhost HTTP.
-- No local AI model; AI is external only.
-- 8 GB RAM / single CPU / HDD: lazy loading, limited workers, sequential
-  project writes by default.
+# Services:
+# - MCP Server: http://localhost:8766
+# - Bridge: http://localhost:8765
+# - Grafana: http://localhost:3000 (admin/admin)
+# - Prometheus: http://localhost:9090
+```
 
-See `docs/` for architecture, decisions, status, checklist, and test plan.
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────┐     MCP/HTTP      ┌─────────────────┐
+│  AI Client      │ ◄────────────────► │  MCP Server     │
+│ (OpenCode, etc) │                    │ (stdio/HTTP)    │
+└─────────────────┘                    └────────┬────────┘
+                                                │
+                                                ▼
+                                    ┌─────────────────────┐
+                                    │   QGIS Bridge       │
+                                    │ (FastAPI + WebSocket)│
+                                    │ 340+ tools          │
+                                    └─────────┬───────────┘
+                                              │
+                                              ▼
+                                    ┌─────────────────────┐
+                                    │     QGIS 4.x        │
+                                    │ (PyQt6 + PyQGIS)    │
+                                    └─────────────────────┘
+```
+
+### Core Components
+
+| Component | Description |
+|-----------|-------------|
+| **core/** | EventBus, JobManager, EmergencyStop, ResourceQuota, CircuitBreaker, CapabilityRegistry |
+| **database/** | SQLite WAL, migrations, repositories |
+| **bridge/** | FastAPI + WebSocket, 340+ tools, rate limiting |
+| **mcp_server/** | MCP 1.2+ server, stdio + Streamable HTTP, verification, approval |
+| **clusters/** | 25 GIS clusters (M01-M25), 430 operations |
+| **engines/** | 7 engines: screen, visual, cursor, mouse/keyboard, verification, CV, georeferencing |
+| **agents/** | 29 built-in agents + custom builder + orchestrator |
+| **workflows/** | DAG engine, 13 node types, checkpointing |
+| **skills/** | Validation, CRUD, 1 builtin (automatic georeferencing) |
+| **extensions/** | Install/uninstall/enable with manifests |
+| **security/** | Permissions, approvals, API keys, rate limiting |
+| **monitoring/** | Audit logs, health checks, resource quotas |
+
+---
+
+## 🛠️ Development
+
+```bash
+# Install dev dependencies
+make install-dev
+
+# Run tests
+make test              # All tests
+make test-unit         # Unit tests only
+make test-coverage     # With coverage report
+
+# Code quality
+make lint              # Ruff linter
+make format            # Ruff + Black + isort
+make type-check        # MyPy
+
+# Run servers
+make run-mcp-stdio     # MCP server (stdio)
+make run-mcp-http      # MCP server (HTTP)
+make run-bridge        # QGIS Bridge
+```
+
+### Pre-commit Hooks
+
+```bash
+pre-commit install
+```
+
+---
+
+## 📦 Installation Methods
+
+| Method | Command |
+|--------|---------|
+| **pip (base)** | `pip install universal-ai-gis-studio` |
+| **pip (MCP)** | `pip install universal-ai-gis-studio[mcp]` |
+| **pip (OpenCV)** | `pip install universal-ai-gis-studio[opencv]` |
+| **pip (dev)** | `pip install universal-ai-gis-studio[dev]` |
+| **pip (all)** | `pip install universal-ai-gis-studio[all]` |
+| **Docker** | `docker pull chandra7480/universal-ai-gis-studio:latest` |
+
+---
+
+## 🔧 Configuration
+
+Copy `.env.example` to `.env` and customize:
+
+```bash
+cp .env.example .env
+```
+
+Key settings:
+```bash
+UAGIS_BRIDGE_URL=http://127.0.0.1:8765
+UAGIS_BRIDGE_AUTH_TOKEN=your-secure-token
+MCP_TRANSPORT=stdio          # or streamable-http
+MCP_HTTP_PORT=8766
+```
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+make test
+
+# Unit tests only
+make test-unit
+
+# With coverage
+make test-coverage
+```
+
+---
+
+## 📚 Documentation
+
+- [Architecture](docs/SYSTEM_ARCHITECTURE.md)
+- [Development Status](docs/DEVELOPMENT_STATUS.md)
+- [Implementation Checklist](docs/IMPLEMENTATION_CHECKLIST.md)
+- [Technical Decisions](docs/TECHNICAL_DECISIONS.md)
+- [Test Plan](docs/TEST_PLAN.md)
+- [Tool Reference](docs/TOOL_REFERENCE.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+
+---
+
+## 🤝 Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+1. Fork & clone
+2. Create feature branch
+3. Write tests
+4. Run quality checks: `make lint && make type-check && make test`
+5. Submit PR
+
+---
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE)
+
+---
+
+## 🙏 Acknowledgments
+
+- [QGIS](https://qgis.org/) - The amazing open-source GIS platform
+- [Model Context Protocol](https://modelcontextprotocol.io/) - The protocol enabling AI-tool interaction
+- [OpenCode](https://opencode.ai/) - AI coding agent
+- All contributors and the open-source GIS community
+
+---
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/Chandra7480/QGIS_Studio/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Chandra7480/QGIS_Studio/discussions)
+- **Security**: Report security issues privately via GitHub Security Advisories
+
+---
+
+**Made with ❤️ for the GIS and AI communities**
